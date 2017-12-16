@@ -224,6 +224,14 @@ const Module *Executor::setModule(llvm::Module *module, const ModuleOptions &opt
 }
 
 Executor::~Executor() {
+    // wzj : dump states
+    llvm::errs() << "Exiting. Dumping all remaining execution states.\n";
+    int i = 0;
+    for (StateSet::iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
+        ExecutionState *es = *it;
+        llvm::errs() << (++i) << ". " << es->pc->inst << "\n";
+    }
+
     delete memory;
     delete externalDispatcher;
     if (processTree)
@@ -652,6 +660,10 @@ Executor::StatePair Executor::fork(ExecutionState &current, ref<Expr> condition,
         std::stringstream ss;
         ss << "Query timed out on condition " << condition;
         terminateStateEarly(current, ss.str());
+        
+        // wzj
+        llvm::errs() << "Executor::fork(): evaluate failed.\n";
+            
         return StatePair(0, 0);
     }
 
@@ -676,8 +688,14 @@ Executor::StatePair Executor::fork(ExecutionState &current, ref<Expr> condition,
     // hint to just use the single constraint instead of all the binary
     // search ones. If that makes sense.
     if (res == Solver::True) {
+        // wzj
+        llvm::errs() << "Executor::fork(): Solver::True.\n";
+
         return StatePair(&current, 0);
     } else if (res == Solver::False) {
+        // wzj
+        llvm::errs() << "Executor::fork(): Solver::False.\n";
+
         return StatePair(0, &current);
     } else {
         TimerStatIncrementer timer(stats::forkTime);
@@ -699,6 +717,9 @@ Executor::StatePair Executor::fork(ExecutionState &current, ref<Expr> condition,
 
         addConstraint(*trueState, condition);
         addConstraint(*falseState, Expr::createIsZero(condition));
+
+        // wzj
+        llvm::errs() << "Executor::fork(): forked 2 states.\n";
 
         return StatePair(trueState, falseState);
     }
@@ -1161,6 +1182,12 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
                 assert(bi->getCondition() == bi->getOperand(0) && "Wrong operand index!");
                 ref<Expr> cond = eval(ki, 0, state).value;
                 Executor::StatePair branches = fork(state, cond, false);
+
+                // wzj: log the branch info
+                *klee_warning_stream << "BranchInst with cond " << cond << "\n";
+                //llvm::errs() << bi->getParent() << "\n";
+                //llvm::errs() << bi->getSuccessor(0) << " : "  << branches.first << "\n";
+                //llvm::errs() << bi->getSuccessor(1) << " : "  << branches.second << "\n";
 
                 if (branches.first)
                     transferToBasicBlock(bi->getSuccessor(0), bi->getParent(), *branches.first);
